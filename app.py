@@ -9,6 +9,7 @@ import urllib.parse
 # 카카오 REST API 키
 # =========================
 KAKAO_API_KEY = st.secrets["KAKAO_API_KEY"]
+DATA_GO_KR_API_KEY = st.secrets.get("DATA_GO_KR_API_KEY", "")
 
 # =========================
 # 거리 계산 함수
@@ -59,6 +60,177 @@ def search_kakao(keyword, center_lat, center_lon, radius, page=1, sort_type="dis
         return {"documents": []}
 
     return response.json()
+def normalize_company_name(text):
+    text = str(text)
+
+    remove_words = [
+        "주식회사", "(주)", "㈜",
+        "법무법인", "세무법인", "회계법인", "노무법인",
+        "법률사무소", "세무사", "변호사", "회계사",
+        " ", "-", "_", ".", ",", "·", "(", ")", "[", "]"
+    ]
+
+    for word in remove_words:
+        text = text.replace(word, "")
+
+    return text.lower()
+
+
+def address_front(address):
+    address = str(address)
+    parts = address.split()
+
+    if len(parts) >= 4:
+        return " ".join(parts[:4])
+    elif len(parts) >= 3:
+        return " ".join(parts[:3])
+    else:
+        return address
+
+
+def search_nps_workplace(place_name):
+    """
+    국민연금 가입사업장 API에서 사업장명으로 검색.
+    API 엔드포인트/필드명은 공공데이터포털 활용명세와 다를 수 있어서
+    response 구조를 최대한 유연하게 처리함.
+    """
+
+    if not DATA_GO_KR_API_KEY:
+        return []
+
+    # 공공데이터포털 활용명세에서 제공하는 endpoint가 다를 수 있음.
+    # 아래 URL은 적용 후 오류가 나면 data.go.kr의 '미리보기/활용명세' endpoint로 교체해야 함.
+    url = "https://apis.data.go.kr/B552015/NpsBplcInfoInqireService/getBassInfoSearch"
+
+    params = {
+        "serviceKey": DATA_GO_KR_API_KEY,
+        "wkpl_nm": place_name,
+        "numOfRows": 10,
+        "pageNo": 1,
+        "resultType": "json"
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=8)
+
+        if response.status_code != 200:
+            return []
+
+        data = response.json()
+
+        body = data.get("response", {}).get("body", {})
+        items = body.get("items", {})
+
+        if isinstance(items, dict):
+            item = items.get("item", [])
+        else:
+            item = items
+
+        if isinstance(item, dict):
+            return [item]
+
+        if isinstance(item, list):
+            return item
+
+        return []
+
+    except Exception:
+        return []
+
+def get_value_from_item(item, candidates):
+    for key in candidates:
+        if key in item and item.get(key) not in [None, ""]:
+            return item.get(key)
+    return ""
+
+
+def match_nps_employee_count(place_name, road_address, jibun_address):
+    items = search_nps_workplace(place_name)
+
+    if len(items) == 0:
+        return {
+            "추정임직원수": "",
+            "임직원수출처": "",
+            "임직원수기준": "",
+            "임직원수신뢰도": "미확인",
+            "국민연금매칭사업장명": "",
+            "국민연금매칭주소": ""
+        }
+
+    kakao_name_norm = normalize_company_name(place_name)
+    kakao_addr = road_address if str(road_address) != "" else jibun_address
+    kakao_addr_front = address_front(kakao_addr)
+
+    best_match = None
+    best_score = 0
+
+    for item in items:
+        # 공공데이터 필드명이 명세에 따라 다를 수 있어서 후보명을 여러 개 둠
+        nps_name = get_value_from_item(
+            item,
+            ["wkplNm", "wkpl_nm", "사업장명", "bzowrNm"]
+        )
+
+        nps_addr = get_value_from_item(
+            item,
+            ["wkplRoadNmDtlAddr", "wkplRnDtlAddr", "wkplAddr", "주소", "wkpl도로명상세주소"]
+        )
+
+        nps_count = get_value_from_item(
+            item,
+            ["jnngpCnt", "가입자수", "crrmmNtcAmt", "wkplJnngpCnt"]
+        )
+
+        nps_name_norm = normalize_company_name(nps_name)
+        nps_addr_front = address_front(nps_addr)
+
+        score = 0
+
+        if kakao_name_norm and nps_name_norm:
+            if kakao_name_norm == nps_name_norm:
+                score += 70
+            elif kakao_name_norm in nps_name_norm or nps_name_norm in kakao_name_norm:
+                score += 50
+
+        if kakao_addr_front and nps_addr_front:
+            if kakao_addr_front == nps_addr_front:
+                score += 40
+            elif kakao_addr_front.split()[0:3] == nps_addr_front.split()[0:3]:
+                score += 25
+
+        if score > best_score:
+            best_score = score
+            best_match = {
+                "name": nps_name,
+                "addr": nps_addr,
+                "count": nps_count
+            }
+
+    if best_match is None or best_score < 50:
+        return {
+            "추정임직원수": "",
+            "임직원수출처": "국민연금 가입사업장 내역",
+            "임직원수기준": "사업장가입자 수",
+            "임직원수신뢰도": "수동확인필요",
+            "국민연금매칭사업장명": "",
+            "국민연금매칭주소": ""
+        }
+
+    if best_score >= 90:
+        confidence = "상"
+    elif best_score >= 70:
+        confidence = "중"
+    else:
+        confidence = "하"
+
+    return {
+        "추정임직원수": best_match["count"],
+        "임직원수출처": "국민연금 가입사업장 내역",
+        "임직원수기준": "사업장가입자 수",
+        "임직원수신뢰도": confidence,
+        "국민연금매칭사업장명": best_match["name"],
+        "국민연금매칭주소": best_match["addr"]
+    }
 
 # =========================
 # 건물주소 간단 추출
@@ -186,6 +358,11 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
                         road_address = d.get("road_address_name", "")
                         jibun_address = d.get("address_name", "")
                         final_address = road_address if road_address else jibun_address
+                        nps_result = match_nps_employee_count(
+                            place_name,
+                            road_address,
+                            jibun_address
+                        )
 
                         rows.append({
                             "기준장소": center_name,
@@ -203,7 +380,12 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
                             "기준장소거리_m": distance_m,
                             "카카오URL": d.get("place_url", ""),
                             "전문인력수": "",
-                            "추정임직원수": "",
+                            "추정임직원수": nps_result["추정임직원수"],
+                            "임직원수출처": nps_result["임직원수출처"],
+                            "임직원수기준": nps_result["임직원수기준"],
+                            "임직원수신뢰도": nps_result["임직원수신뢰도"],
+                            "국민연금매칭사업장명": nps_result["국민연금매칭사업장명"],
+                            "국민연금매칭주소": nps_result["국민연금매칭주소"],
                             "출처URL": d.get("place_url", ""),
                             "최종확인일": str(date.today()),
                             "메모": ""
@@ -303,6 +485,12 @@ def collect_places_grid(center_name, center_lat, center_lon, keywords, radius, m
                             jibun_address = d.get("address_name", "")
                             final_address = road_address if road_address else jibun_address
 
+                            nps_result = match_nps_employee_count(
+                                place_name,
+                                road_address,
+                                jibun_address
+                            )
+
                             rows.append({
                                 "기준장소": center_name,
                                 "검색키워드": keyword,
@@ -319,7 +507,12 @@ def collect_places_grid(center_name, center_lat, center_lon, keywords, radius, m
                                 "기준장소거리_m": distance_m,
                                 "카카오URL": d.get("place_url", ""),
                                 "전문인력수": "",
-                                "추정임직원수": "",
+                                "추정임직원수": nps_result["추정임직원수"],
+                                "임직원수출처": nps_result["임직원수출처"],
+                                "임직원수기준": nps_result["임직원수기준"],
+                                "임직원수신뢰도": nps_result["임직원수신뢰도"],
+                                "국민연금매칭사업장명": nps_result["국민연금매칭사업장명"],
+                                "국민연금매칭주소": nps_result["국민연금매칭주소"],
                                 "출처URL": d.get("place_url", ""),
                                 "최종확인일": str(date.today()),
                                 "메모": ""
