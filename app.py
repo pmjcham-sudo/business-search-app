@@ -145,7 +145,14 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
 
     # 중복 제거
     df = df.drop_duplicates(subset=["업체명", "도로명주소"])
+    
+    # 반경 재필터링
+    df = df[df["기준장소거리_m"] <= radius]
 
+    if len(df) == 0:
+        return df
+
+    
     # 거리순 정렬
     df = df.sort_values("기준장소거리_m")
 
