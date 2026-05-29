@@ -583,13 +583,16 @@ def add_nps_info_to_dataframe(df):
     if len(df) == 0:
         return df
 
+    # 인덱스 초기화: 진행률 오류 방지
+    df = df.reset_index(drop=True)
+
     # 같은 업체명+주소 조합은 한 번만 조회하기 위한 캐시
     nps_cache = {}
 
     progress = st.progress(0)
     total = len(df)
 
-    for idx, row in df.iterrows():
+    for position, row in df.iterrows():
         place_name = row.get("업체명", "")
         road_address = row.get("도로명주소", "")
         jibun_address = row.get("지번주소", "")
@@ -606,14 +609,18 @@ def add_nps_info_to_dataframe(df):
             )
             nps_cache[cache_key] = nps_result
 
-        df.at[idx, "추정임직원수"] = nps_result["추정임직원수"]
-        df.at[idx, "임직원수출처"] = nps_result["임직원수출처"]
-        df.at[idx, "임직원수기준"] = nps_result["임직원수기준"]
-        df.at[idx, "임직원수신뢰도"] = nps_result["임직원수신뢰도"]
-        df.at[idx, "국민연금매칭사업장명"] = nps_result["국민연금매칭사업장명"]
-        df.at[idx, "국민연금매칭주소"] = nps_result["국민연금매칭주소"]
+        df.at[position, "추정임직원수"] = nps_result["추정임직원수"]
+        df.at[position, "임직원수출처"] = nps_result["임직원수출처"]
+        df.at[position, "임직원수기준"] = nps_result["임직원수기준"]
+        df.at[position, "임직원수신뢰도"] = nps_result["임직원수신뢰도"]
+        df.at[position, "국민연금매칭사업장명"] = nps_result["국민연금매칭사업장명"]
+        df.at[position, "국민연금매칭주소"] = nps_result["국민연금매칭주소"]
 
-        progress.progress((idx + 1) / total)
+        # 진행률은 반드시 0~1 사이로 제한
+        progress_value = (position + 1) / total
+        progress.progress(min(progress_value, 1.0))
+
+    progress.empty()
 
     return df
 
