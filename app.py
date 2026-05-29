@@ -149,30 +149,30 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
 
     return make_result_dataframe(rows, radius)
     def generate_grid_points(center_lat, center_lon, radius_m, step_m):
-    points = []
+        points = []
 
-    # 대략적인 위도/경도 변환
-    lat_per_meter = 1 / 111000
-    lon_per_meter = 1 / (111000 * cos(radians(center_lat)))
+        # 대략적인 위도/경도 변환
+        lat_per_meter = 1 / 111000
+        lon_per_meter = 1 / (111000 * cos(radians(center_lat)))
 
-    steps = int(radius_m // step_m) + 1
+        steps = int(radius_m // step_m) + 1
 
-    for i in range(-steps, steps + 1):
-        for j in range(-steps, steps + 1):
-            new_lat = center_lat + (i * step_m * lat_per_meter)
-            new_lon = center_lon + (j * step_m * lon_per_meter)
+        for i in range(-steps, steps + 1):
+            for j in range(-steps, steps + 1):
+                new_lat = center_lat + (i * step_m * lat_per_meter)
+                new_lon = center_lon + (j * step_m * lon_per_meter)
 
-            distance_from_center = haversine(
-                center_lat,
-                center_lon,
-                new_lat,
-                new_lon
-            )
+                distance_from_center = haversine(
+                    center_lat,
+                    center_lon,
+                    new_lat,
+                    new_lon
+                )
 
-            if distance_from_center <= radius_m:
-                points.append((new_lat, new_lon))
+                if distance_from_center <= radius_m:
+                    points.append((new_lat, new_lon))
 
-    return points
+        return points
 
 
 def collect_places_grid(center_name, center_lat, center_lon, keywords, radius, max_page, grid_step):
