@@ -584,7 +584,24 @@ if search_button:
             # 전체 결과
             st.subheader("전체 검색 결과")
 
-            st.dataframe(result_df, use_container_width=True)
+            st.dataframe(
+                result_df,
+                use_container_width=True,
+                column_config={
+                    "카카오URL": st.column_config.LinkColumn(
+                        "카카오지도",
+                        display_text="열기"
+                    ),
+                    "네이버지도검색URL": st.column_config.LinkColumn(
+                        "네이버지도",
+                        display_text="열기"
+                    ),
+                    "출처URL": st.column_config.LinkColumn(
+                        "출처",
+                        display_text="열기"
+                    )
+                }
+            )
 
             # CSV 다운로드
             csv_data = result_df.to_csv(index=False, encoding="utf-8-sig")
