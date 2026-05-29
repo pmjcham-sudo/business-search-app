@@ -373,9 +373,10 @@ center_lon = st.sidebar.number_input(
 radius = st.sidebar.slider(
     "검색 반경(m)",
     min_value=100,
-    max_value=20000,
+    max_value=5000,
     value=1000,
-    step=100
+    step=100,
+    help="빠른 검색은 가까운 결과 위주로 가져옵니다. 1km 이상은 정밀 검색 사용을 권장합니다."
 )
 
 search_mode = st.sidebar.radio(
