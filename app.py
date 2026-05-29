@@ -358,11 +358,7 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
                         road_address = d.get("road_address_name", "")
                         jibun_address = d.get("address_name", "")
                         final_address = road_address if road_address else jibun_address
-                        nps_result = match_nps_employee_count(
-                            place_name,
-                            road_address,
-                            jibun_address
-                        )
+                        
 
                         rows.append({
                             "기준장소": center_name,
@@ -380,12 +376,12 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
                             "기준장소거리_m": distance_m,
                             "카카오URL": d.get("place_url", ""),
                             "전문인력수": "",
-                            "추정임직원수": nps_result["추정임직원수"],
-                            "임직원수출처": nps_result["임직원수출처"],
-                            "임직원수기준": nps_result["임직원수기준"],
-                            "임직원수신뢰도": nps_result["임직원수신뢰도"],
-                            "국민연금매칭사업장명": nps_result["국민연금매칭사업장명"],
-                            "국민연금매칭주소": nps_result["국민연금매칭주소"],
+                            "추정임직원수": "",
+                            "임직원수출처": "",
+                            "임직원수기준": "",
+                            "임직원수신뢰도": "",
+                            "국민연금매칭사업장명": "",
+                            "국민연금매칭주소": "",
                             "출처URL": d.get("place_url", ""),
                             "최종확인일": str(date.today()),
                             "메모": ""
@@ -583,6 +579,44 @@ def make_result_dataframe(rows, radius):
 
     return df
 
+def add_nps_info_to_dataframe(df):
+    if len(df) == 0:
+        return df
+
+    # 같은 업체명+주소 조합은 한 번만 조회하기 위한 캐시
+    nps_cache = {}
+
+    progress = st.progress(0)
+    total = len(df)
+
+    for idx, row in df.iterrows():
+        place_name = row.get("업체명", "")
+        road_address = row.get("도로명주소", "")
+        jibun_address = row.get("지번주소", "")
+
+        cache_key = str(place_name) + "|" + str(road_address)
+
+        if cache_key in nps_cache:
+            nps_result = nps_cache[cache_key]
+        else:
+            nps_result = match_nps_employee_count(
+                place_name,
+                road_address,
+                jibun_address
+            )
+            nps_cache[cache_key] = nps_result
+
+        df.at[idx, "추정임직원수"] = nps_result["추정임직원수"]
+        df.at[idx, "임직원수출처"] = nps_result["임직원수출처"]
+        df.at[idx, "임직원수기준"] = nps_result["임직원수기준"]
+        df.at[idx, "임직원수신뢰도"] = nps_result["임직원수신뢰도"]
+        df.at[idx, "국민연금매칭사업장명"] = nps_result["국민연금매칭사업장명"]
+        df.at[idx, "국민연금매칭주소"] = nps_result["국민연금매칭주소"]
+
+        progress.progress((idx + 1) / total)
+
+    return df
+
 # =========================
 # Streamlit 화면
 # =========================
@@ -658,6 +692,12 @@ search_mode = st.sidebar.radio(
     help="빠른 검색은 기준점 1곳에서 검색합니다. 정밀 검색은 반경 안을 여러 구역으로 나누어 더 많이 수집합니다."
 )
 
+use_nps = st.sidebar.checkbox(
+    "국민연금 가입자 수 조회",
+    value=False,
+    help="켜면 추정임직원수를 조회합니다. 검색 시간이 오래 걸릴 수 있습니다."
+)
+
 grid_step = st.sidebar.selectbox(
     "정밀 검색 간격",
     [300, 500, 700, 1000],
@@ -727,6 +767,10 @@ if search_button:
                     max_page=max_page,
                     grid_step=grid_step
                 )
+            if use_nps and len(result_df) > 0:
+                with st.spinner("국민연금 가입자 수를 조회하는 중입니다..."):
+                    result_df = add_nps_info_to_dataframe(result_df)
+        
         st.divider()
 
         if len(result_df) == 0:
