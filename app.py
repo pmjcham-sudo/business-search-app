@@ -100,23 +100,36 @@ def search_nps_workplace(place_name):
 
     # 공공데이터포털 활용명세에서 제공하는 endpoint가 다를 수 있음.
     # 아래 URL은 적용 후 오류가 나면 data.go.kr의 '미리보기/활용명세' endpoint로 교체해야 함.
-    url = "https://apis.data.go.kr/B552015/NpsBplcInfoInqireService/getBassInfoSearch"
+    url = "https://apis.data.go.kr/B552015/NpsBplcInfoInqireServiceV2/getBassInfoSearchV2"
 
     params = {
-        "serviceKey": DATA_GO_KR_API_KEY,
-        "wkpl_nm": place_name,
-        "numOfRows": 10,
-        "pageNo": 1,
-        "resultType": "json"
+    "serviceKey": DATA_GO_KR_API_KEY,
+    "wkpl_nm": place_name,
+    "numOfRows": 10,
+    "pageNo": 1,
+    "resultType": "json"
     }
 
     try:
         response = requests.get(url, params=params, timeout=8)
 
         if response.status_code != 200:
-            return []
+            st.warning(f"국민연금 API 상태코드: {response.status_code}")
+        st.write(response.text[:500])
+        return []
 
+    try:
         data = response.json()
+    except Exception:
+        st.warning("국민연금 API 응답이 JSON이 아닙니다.")
+        st.write(response.text[:500])
+        return []
+
+    # 디버그용: 처음 한 번 응답 구조 확인
+    if "nps_debug_shown" not in st.session_state:
+        st.session_state["nps_debug_shown"] = True
+        st.write("국민연금 API 응답 예시:")
+        st.json(data)
 
         body = data.get("response", {}).get("body", {})
         items = body.get("items", {})
