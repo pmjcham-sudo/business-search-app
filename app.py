@@ -72,7 +72,64 @@ def make_building_address(address):
         return " ".join(parts[:4])
     else:
         return address
+def is_valid_result(keyword, place_name, category_name):
+    keyword = str(keyword)
+    place_name = str(place_name)
+    category_name = str(category_name)
 
+    text = place_name + " " + category_name
+
+    tax_keywords = [
+        "세무", "세무사", "세무법인",
+        "회계", "회계사", "회계법인"
+    ]
+
+    law_keywords = [
+        "법무법인", "변호사", "법률", "로펌", "법률사무소"
+    ]
+
+    scrivener_keywords = [
+        "법무사"
+    ]
+
+    hospital_keywords = [
+        "병원", "의원", "치과", "한의원", "약국",
+        "내과", "정형외과", "피부과", "이비인후과",
+        "안과", "산부인과", "소아과", "정신건강의학과"
+    ]
+
+    exclude_keywords = [
+        "학원", "어학원", "교습소",
+        "부동산", "공인중개사",
+        "카페", "식당", "음식점",
+        "미용실", "네일", "피부관리",
+        "행정사"
+    ]
+
+    # 제외어 우선 적용
+    if any(bad in text for bad in exclude_keywords):
+        # 사용자가 행정사를 검색한 경우에는 행정사 결과를 살림
+        if "행정사" not in keyword:
+            return False
+
+    # 세무/회계 계열 검색
+    if "세무" in keyword or "회계" in keyword:
+        return any(word in text for word in tax_keywords)
+
+    # 법무법인/변호사/로펌 계열 검색
+    if "법무법인" in keyword or "변호사" in keyword or "로펌" in keyword or "법률" in keyword:
+        return any(word in text for word in law_keywords)
+
+    # 법무사 검색
+    if "법무사" in keyword:
+        return any(word in text for word in scrivener_keywords)
+
+    # 병의원/의료 계열 검색
+    if any(word in keyword for word in hospital_keywords):
+        return any(word in text for word in hospital_keywords)
+
+    # 그 외 일반 검색어는 일단 통과
+    return True
 
 # =========================
 # 데이터 수집 함수
@@ -107,12 +164,19 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
                         lat = float(d["y"])
                         lon = float(d["x"])
 
+                        place_name = d.get("place_name", "")
+                        category_name = d.get("category_name", "")
+                        
+                        if not is_valid_result(keyword, place_name, category_name):
+                            continue
+
                         distance_m = haversine(
                             center_lat,
                             center_lon,
                             lat,
                             lon
                         )
+                        
 
                         # 실제 반경 기준으로 다시 필터링
                         if distance_m > radius:
@@ -127,8 +191,8 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
                             "검색키워드": keyword,
                             "검색방식": "빠른검색",
                             "정렬방식": sort_type,
-                            "업체명": d.get("place_name", ""),
-                            "카테고리": d.get("category_name", ""),
+                            "업체명": place_name,
+                            "카테고리": category_name,
                             "도로명주소": road_address,
                             "지번주소": jibun_address,
                             "건물주소": make_building_address(final_address),
@@ -213,10 +277,15 @@ def collect_places_grid(center_name, center_lat, center_lon, keywords, radius, m
                         continue
 
                     for d in documents:
-                        try:
+                        try:                            
                             lat = float(d["y"])
                             lon = float(d["x"])
 
+                            place_name = d.get("place_name", "")
+                            category_name = d.get("category_name", "")
+
+                            if not is_valid_result(keyword, place_name, category_name):
+                                continue
                             # 최종 거리는 원래 기준장소 기준으로 계산
                             distance_m = haversine(
                                 center_lat,
@@ -238,8 +307,8 @@ def collect_places_grid(center_name, center_lat, center_lon, keywords, radius, m
                                 "검색키워드": keyword,
                                 "검색방식": "정밀검색",
                                 "정렬방식": sort_type,
-                                "업체명": d.get("place_name", ""),
-                                "카테고리": d.get("category_name", ""),
+                                "업체명": place_name,
+                                "카테고리": category_name,
                                 "도로명주소": road_address,
                                 "지번주소": jibun_address,
                                 "건물주소": make_building_address(final_address),
