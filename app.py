@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 from math import radians, sin, cos, sqrt, atan2
 from datetime import date
+import urllib.parse
 
 # =========================
 # 카카오 REST API 키
@@ -332,7 +333,15 @@ def collect_places_grid(center_name, center_lat, center_lon, keywords, radius, m
 
 def make_result_dataframe(rows, radius):
     df = pd.DataFrame(rows)
-
+    
+    # 네이버지도 검색 URL 추가
+    df["네이버지도검색URL"] = df["업체명"].apply(
+        lambda x: "https://map.naver.com/p/search/" + urllib.parse.quote(str(x))
+    )
+    
+    # 검증 상태 기본값 추가
+    df["검증상태"] = "미확인"
+    
     if len(df) == 0:
         return df
 
@@ -369,6 +378,8 @@ def make_result_dataframe(rows, radius):
             "위도",
             "경도",
             "카카오URL",
+            "네이버지도검색URL",
+            "검증상태",
             "전문인력수",
             "추정임직원수",
             "출처URL",
