@@ -33,7 +33,7 @@ def haversine(lat1, lon1, lat2, lon2):
 # =========================
 # 카카오 장소 검색 함수
 # =========================
-def search_kakao(keyword, center_lat, center_lon, radius, page=1):
+def search_kakao(keyword, center_lat, center_lon, radius, page=1, sort_type="distance"):
     url = "https://dapi.kakao.com/v2/local/search/keyword.json"
 
     headers = {
@@ -47,7 +47,7 @@ def search_kakao(keyword, center_lat, center_lon, radius, page=1):
         "radius": radius,
         "page": page,
         "size": 15,
-        "sort": "distance"
+        "sort": sort_type
     }
 
     response = requests.get(url, headers=headers, params=params)
@@ -58,7 +58,6 @@ def search_kakao(keyword, center_lat, center_lon, radius, page=1):
         return {"documents": []}
 
     return response.json()
-
 
 # =========================
 # 건물주소 간단 추출
@@ -87,57 +86,182 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
         if keyword == "":
             continue
 
-        for page in range(1, max_page + 1):
-            data = search_kakao(
-                keyword=keyword,
-                center_lat=center_lat,
-                center_lon=center_lon,
-                radius=radius,
-                page=page
-            )
+        for sort_type in ["distance", "accuracy"]:
+            for page in range(1, max_page + 1):
+                data = search_kakao(
+                    keyword=keyword,
+                    center_lat=center_lat,
+                    center_lon=center_lon,
+                    radius=radius,
+                    page=page,
+                    sort_type=sort_type
+                )
 
-            documents = data.get("documents", [])
+                documents = data.get("documents", [])
 
-            if len(documents) == 0:
-                continue
+                if len(documents) == 0:
+                    continue
 
-            for d in documents:
-                try:
-                    lat = float(d["y"])
-                    lon = float(d["x"])
+                for d in documents:
+                    try:
+                        lat = float(d["y"])
+                        lon = float(d["x"])
 
-                    road_address = d.get("road_address_name", "")
-                    jibun_address = d.get("address_name", "")
-                    final_address = road_address if road_address else jibun_address
-
-                    rows.append({
-                        "기준장소": center_name,
-                        "검색키워드": keyword,
-                        "업체명": d.get("place_name", ""),
-                        "카테고리": d.get("category_name", ""),
-                        "도로명주소": road_address,
-                        "지번주소": jibun_address,
-                        "건물주소": make_building_address(final_address),
-                        "전화번호": d.get("phone", ""),
-                        "위도": lat,
-                        "경도": lon,
-                        "기준장소거리_m": haversine(
+                        distance_m = haversine(
                             center_lat,
                             center_lon,
                             lat,
                             lon
-                        ),
-                        "카카오URL": d.get("place_url", ""),
-                        "전문인력수": "",
-                        "추정임직원수": "",
-                        "출처URL": d.get("place_url", ""),
-                        "최종확인일": str(date.today()),
-                        "메모": ""
-                    })
+                        )
 
-                except Exception as e:
-                    st.warning(f"개별 데이터 처리 오류: {e}")
+                        # 실제 반경 기준으로 다시 필터링
+                        if distance_m > radius:
+                            continue
 
+                        road_address = d.get("road_address_name", "")
+                        jibun_address = d.get("address_name", "")
+                        final_address = road_address if road_address else jibun_address
+
+                        rows.append({
+                            "기준장소": center_name,
+                            "검색키워드": keyword,
+                            "검색방식": "빠른검색",
+                            "정렬방식": sort_type,
+                            "업체명": d.get("place_name", ""),
+                            "카테고리": d.get("category_name", ""),
+                            "도로명주소": road_address,
+                            "지번주소": jibun_address,
+                            "건물주소": make_building_address(final_address),
+                            "전화번호": d.get("phone", ""),
+                            "위도": lat,
+                            "경도": lon,
+                            "기준장소거리_m": distance_m,
+                            "카카오URL": d.get("place_url", ""),
+                            "전문인력수": "",
+                            "추정임직원수": "",
+                            "출처URL": d.get("place_url", ""),
+                            "최종확인일": str(date.today()),
+                            "메모": ""
+                        })
+
+                    except Exception as e:
+                        st.warning(f"개별 데이터 처리 오류: {e}")
+
+    return make_result_dataframe(rows, radius)
+    def generate_grid_points(center_lat, center_lon, radius_m, step_m):
+    points = []
+
+    # 대략적인 위도/경도 변환
+    lat_per_meter = 1 / 111000
+    lon_per_meter = 1 / (111000 * cos(radians(center_lat)))
+
+    steps = int(radius_m // step_m) + 1
+
+    for i in range(-steps, steps + 1):
+        for j in range(-steps, steps + 1):
+            new_lat = center_lat + (i * step_m * lat_per_meter)
+            new_lon = center_lon + (j * step_m * lon_per_meter)
+
+            distance_from_center = haversine(
+                center_lat,
+                center_lon,
+                new_lat,
+                new_lon
+            )
+
+            if distance_from_center <= radius_m:
+                points.append((new_lat, new_lon))
+
+    return points
+
+
+def collect_places_grid(center_name, center_lat, center_lon, keywords, radius, max_page, grid_step):
+    rows = []
+
+    grid_points = generate_grid_points(
+        center_lat=center_lat,
+        center_lon=center_lon,
+        radius_m=radius,
+        step_m=grid_step
+    )
+
+    st.write(f"정밀 검색 격자점 수: {len(grid_points)}개")
+
+    for keyword in keywords:
+        keyword = keyword.strip()
+
+        if keyword == "":
+            continue
+
+        for idx, point in enumerate(grid_points):
+            grid_lat, grid_lon = point
+
+            for sort_type in ["distance", "accuracy"]:
+                for page in range(1, max_page + 1):
+                    data = search_kakao(
+                        keyword=keyword,
+                        center_lat=grid_lat,
+                        center_lon=grid_lon,
+                        radius=grid_step,
+                        page=page,
+                        sort_type=sort_type
+                    )
+
+                    documents = data.get("documents", [])
+
+                    if len(documents) == 0:
+                        continue
+
+                    for d in documents:
+                        try:
+                            lat = float(d["y"])
+                            lon = float(d["x"])
+
+                            # 최종 거리는 원래 기준장소 기준으로 계산
+                            distance_m = haversine(
+                                center_lat,
+                                center_lon,
+                                lat,
+                                lon
+                            )
+
+                            # 최종적으로 원래 검색 반경 밖이면 제외
+                            if distance_m > radius:
+                                continue
+
+                            road_address = d.get("road_address_name", "")
+                            jibun_address = d.get("address_name", "")
+                            final_address = road_address if road_address else jibun_address
+
+                            rows.append({
+                                "기준장소": center_name,
+                                "검색키워드": keyword,
+                                "검색방식": "정밀검색",
+                                "정렬방식": sort_type,
+                                "업체명": d.get("place_name", ""),
+                                "카테고리": d.get("category_name", ""),
+                                "도로명주소": road_address,
+                                "지번주소": jibun_address,
+                                "건물주소": make_building_address(final_address),
+                                "전화번호": d.get("phone", ""),
+                                "위도": lat,
+                                "경도": lon,
+                                "기준장소거리_m": distance_m,
+                                "카카오URL": d.get("place_url", ""),
+                                "전문인력수": "",
+                                "추정임직원수": "",
+                                "출처URL": d.get("place_url", ""),
+                                "최종확인일": str(date.today()),
+                                "메모": ""
+                            })
+
+                        except Exception as e:
+                            st.warning(f"개별 데이터 처리 오류: {e}")
+
+    return make_result_dataframe(rows, radius)
+
+
+def make_result_dataframe(rows, radius):
     df = pd.DataFrame(rows)
 
     if len(df) == 0:
@@ -145,14 +269,13 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
 
     # 중복 제거
     df = df.drop_duplicates(subset=["업체명", "도로명주소"])
-    
+
     # 반경 재필터링
     df = df[df["기준장소거리_m"] <= radius]
 
     if len(df) == 0:
         return df
 
-    
     # 거리순 정렬
     df = df.sort_values("기준장소거리_m")
 
@@ -164,6 +287,8 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
         [
             "업체명",
             "검색키워드",
+            "검색방식",
+            "정렬방식",
             "카테고리",
             "기준장소",
             "도로명주소",
@@ -184,7 +309,6 @@ def collect_places(center_name, center_lat, center_lon, keywords, radius, max_pa
     ]
 
     return df
-
 
 # =========================
 # Streamlit 화면
@@ -254,6 +378,19 @@ radius = st.sidebar.slider(
     step=100
 )
 
+search_mode = st.sidebar.radio(
+    "검색 방식",
+    ["빠른 검색", "정밀 검색"],
+    help="빠른 검색은 기준점 1곳에서 검색합니다. 정밀 검색은 반경 안을 여러 구역으로 나누어 더 많이 수집합니다."
+)
+
+grid_step = st.sidebar.selectbox(
+    "정밀 검색 간격",
+    [300, 500, 700, 1000],
+    index=1,
+    help="정밀 검색에서 격자점을 몇 m 간격으로 만들지 정합니다. 숫자가 작을수록 더 촘촘하지만 느려집니다."
+)
+
 max_page = st.sidebar.slider(
     "검색 페이지 수",
     min_value=1,
@@ -297,15 +434,25 @@ if search_button:
 
     else:
         with st.spinner("검색 중입니다..."):
-            result_df = collect_places(
-                center_name=center_name,
-                center_lat=center_lat,
-                center_lon=center_lon,
-                keywords=keywords,
-                radius=radius,
-                max_page=max_page
-            )
-
+            if search_mode == "빠른 검색":
+                result_df = collect_places(
+                    center_name=center_name,
+                    center_lat=center_lat,
+                    center_lon=center_lon,
+                    keywords=keywords,
+                    radius=radius,
+                    max_page=max_page
+                )
+            else:
+                result_df = collect_places_grid(
+                    center_name=center_name,
+                    center_lat=center_lat,
+                    center_lon=center_lon,
+                    keywords=keywords,
+                    radius=radius,
+                    max_page=max_page,
+                    grid_step=grid_step
+                )
         st.divider()
 
         if len(result_df) == 0:
